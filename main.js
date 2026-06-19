@@ -23,15 +23,25 @@
  *   tower-defense layout; nothing should ever fall under gravity.
  */
 
+const getDpr = () => Math.min(window.devicePixelRatio || 1, 2);
+
 const config = {
-  type: Phaser.AUTO, // let Phaser pick WebGL if available, else Canvas — best cross-platform compatibility
+  type: Phaser.AUTO,
   parent: 'game-container',
+  resolution: getDpr(),
 
   scale: {
-    mode: Phaser.Scale.RESIZE,           // canvas internal size tracks parent container size live
-    autoCenter: Phaser.Scale.CENTER_BOTH, // keep canvas centered through every resize/orientation event
-    width: '100%',
-    height: '100%',
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    autoRound: true,
+  },
+
+  render: {
+    antialias: true,
+    roundPixels: true,
+    powerPreference: 'high-performance',
   },
 
   backgroundColor: '#000000',
@@ -58,14 +68,19 @@ const game = new Phaser.Game(config);
  * or device orientation changes, even on platforms where the 'resize'
  * scale event can be a little late to fire (some older mobile WebViews).
  */
-window.addEventListener('resize', () => {
-  game.scale.resize(window.innerWidth, window.innerHeight);
-});
+function resizeGame() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (game.scale) {
+    game.scale.setParentSize(w, h);
+    game.scale.resize(w, h);
+  }
+}
+
+window.addEventListener('resize', resizeGame);
 
 window.addEventListener('orientationchange', () => {
-  // Small timeout lets the browser finish reporting the new viewport
-  // dimensions before Phaser tries to read them.
-  setTimeout(() => {
-    game.scale.resize(window.innerWidth, window.innerHeight);
-  }, 100);
+  setTimeout(resizeGame, 100);
 });
+
+resizeGame();

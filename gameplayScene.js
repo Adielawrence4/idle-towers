@@ -93,7 +93,7 @@ class GameplayScene extends Phaser.Scene {
   create() {
     const { width, height } = this.cameras.main;
 
-    this.FENCE_RADIUS = 185;
+    this.FENCE_RADIUS = this._getFenceRadius(width, height);
     this.gameOver = false;
     this.waveNumber = 1;
     this.spawnDelay = 3000;
@@ -145,8 +145,31 @@ class GameplayScene extends Phaser.Scene {
       .setDepth(-19);
   }
 
+  _isMobileView(width, height) {
+    return width < 768 || (width < height && width < 520);
+  }
+
+  _getFenceRadius(width, height) {
+    const minDim = Math.min(width, height);
+    if (this._isMobileView(width, height)) {
+      return Math.max(88, Math.round(minDim * 0.21));
+    }
+    return 185;
+  }
+
+  _getDefenseScale(width, height) {
+    const minDim = Math.min(width, height);
+    let scale = Math.max(0.38, minDim / 520);
+    if (this._isMobileView(width, height)) {
+      scale *= 0.48;
+      return Math.max(0.24, scale);
+    }
+    return Math.min(scale, 0.72);
+  }
+
   _buildDefenseLayout() {
-    const scale = Math.max(0.55, Math.min(this.cameras.main.width, this.cameras.main.height) / 520);
+    const { width, height } = this.cameras.main;
+    const scale = this._getDefenseScale(width, height);
 
     this.fenceSprite = this.add.image(this.centerX, this.centerY, 'fence_wall')
       .setScale((this.FENCE_RADIUS * 2) / 128)
@@ -174,51 +197,79 @@ class GameplayScene extends Phaser.Scene {
   }
 
   _buildHUD(width, height) {
-    const uiSize = Math.max(13, Math.round(Math.min(width, height) * 0.022));
-
-    this.goldText = this.add.text(14, 10, `GOLD: ${this.gold}`, {
+    this.goldText = this.add.text(0, 0, `GOLD: ${this.gold}`, {
       fontFamily: 'Consolas, monospace',
-      fontSize: `${uiSize}px`,
       color: '#ffd700',
       stroke: '#000000',
-      strokeThickness: 3,
     }).setScrollFactor(0).setDepth(100);
 
-    this.waveText = this.add.text(14, 10 + uiSize + 8, `WAVE: ${this.waveNumber}`, {
+    this.waveText = this.add.text(0, 0, `WAVE: ${this.waveNumber}`, {
       fontFamily: 'Consolas, monospace',
-      fontSize: `${uiSize}px`,
       color: '#7dd3fc',
       stroke: '#000000',
-      strokeThickness: 3,
     }).setScrollFactor(0).setDepth(100);
 
-    this.timeText = this.add.text(14, 10 + (uiSize + 8) * 2, `TIME: 0s`, {
+    this.timeText = this.add.text(0, 0, 'TIME: 0s', {
       fontFamily: 'Consolas, monospace',
-      fontSize: `${uiSize}px`,
       color: '#cbd5e1',
       stroke: '#000000',
-      strokeThickness: 3,
     }).setScrollFactor(0).setDepth(100);
 
-    this.hpText = this.add.text(width / 2, 10, this._hpLabel(), {
+    this.hpText = this.add.text(0, 0, this._hpLabel(), {
       fontFamily: 'Consolas, monospace',
-      fontSize: `${Math.max(14, uiSize + 1)}px`,
       color: '#86efac',
       stroke: '#000000',
-      strokeThickness: 4,
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
 
-    this.guardText = this.add.text(width - 14, 10, `GUARDS: ${this.guardCount}`, {
+    this.guardText = this.add.text(0, 0, `GUARDS: ${this.guardCount}`, {
       fontFamily: 'Consolas, monospace',
-      fontSize: `${uiSize}px`,
       color: '#c4b5fd',
       stroke: '#000000',
-      strokeThickness: 3,
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(100);
+
+    this._layoutHUD(width, height);
+  }
+
+  _layoutHUD(width, height) {
+    const mobile = this._isMobileView(width, height);
+    const pad = mobile ? 10 : 14;
+    const safeTop = mobile ? 10 : 12;
+    const uiSize = mobile
+      ? Math.max(11, Math.round(width * 0.029))
+      : Math.max(13, Math.round(Math.min(width, height) * 0.022));
+    const lineGap = uiSize + 7;
+    const stroke = mobile ? 2 : 3;
+    const hpSize = mobile ? uiSize : Math.max(14, uiSize + 1);
+
+    this.goldText.setFontSize(uiSize).setStroke('#000000', stroke);
+    this.waveText.setFontSize(uiSize).setStroke('#000000', stroke);
+    this.timeText.setFontSize(uiSize).setStroke('#000000', stroke);
+    this.guardText.setFontSize(uiSize).setStroke('#000000', stroke);
+    this.hpText.setFontSize(hpSize).setStroke('#000000', stroke + 1);
+    this.hpText.setText(this._hpLabel());
+
+    if (mobile) {
+      this.goldText.setOrigin(0, 0).setPosition(pad, safeTop);
+      this.guardText.setOrigin(1, 0).setPosition(width - pad, safeTop);
+      this.hpText.setOrigin(0.5, 0).setPosition(width / 2, safeTop + lineGap + 2);
+      this.waveText.setOrigin(0, 0).setPosition(pad, safeTop + lineGap * 2 + 4);
+      this.timeText.setOrigin(0, 0).setPosition(pad, safeTop + lineGap * 3 + 4);
+    } else {
+      this.goldText.setOrigin(0, 0).setPosition(pad, safeTop);
+      this.waveText.setOrigin(0, 0).setPosition(pad, safeTop + lineGap);
+      this.timeText.setOrigin(0, 0).setPosition(pad, safeTop + lineGap * 2);
+      this.hpText.setOrigin(0.5, 0).setPosition(width / 2, safeTop);
+      this.guardText.setOrigin(1, 0).setPosition(width - pad, safeTop);
+    }
   }
 
   _hpLabel() {
-    return `CITADEL INTEGRITY: ${Math.max(0, Math.ceil(this.citadelHP))}/${this.citadelMaxHP}`;
+    const hp = `${Math.max(0, Math.ceil(this.citadelHP))}/${this.citadelMaxHP}`;
+    const { width, height } = this.cameras.main;
+    if (this._isMobileView(width, height)) {
+      return `INTEGRITY ${hp}`;
+    }
+    return `CITADEL INTEGRITY: ${hp}`;
   }
 
   _buildShop(width, height) {
@@ -788,11 +839,12 @@ class GameplayScene extends Phaser.Scene {
 
     this.centerX = width / 2;
     this.centerY = height / 2;
+    this.FENCE_RADIUS = this._getFenceRadius(width, height);
 
     this.cityBg.setSize(width, height);
     this.battleTint.setPosition(width / 2, height / 2).setSize(width, height);
 
-    const scale = Math.max(0.55, Math.min(width, height) / 520);
+    const scale = this._getDefenseScale(width, height);
     this.citadel.setPosition(this.centerX, this.centerY).setScale(scale);
     this.citadelFlash.setPosition(this.centerX, this.centerY).setScale(scale);
     this.fenceSprite
@@ -800,8 +852,7 @@ class GameplayScene extends Phaser.Scene {
       .setScale((this.FENCE_RADIUS * 2) / 128);
     this._drawFenceRing();
 
-    this.hpText.setPosition(width / 2, 10);
-    this.guardText.setPosition(width - 14, 10);
+    this._layoutHUD(width, height);
 
     const shopY = height - Math.max(64, height * 0.09);
     const btnH = Math.max(48, height * 0.07);
