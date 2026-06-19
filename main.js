@@ -3,27 +3,73 @@
  * --------------------------------------------------------------------------
  * Global engine bootstrap for "Idle Tower: Merchant Guard".
  *
- * This file owns nothing about gameplay logic — its only job is to build the
- * Phaser.Game configuration object and instantiate the engine. All actual
- * behaviour lives inside the Scene classes (MenuScene, GameplayScene,
- * GameOverScene), which are loaded as global classes before this script runs
- * (see index.html load order).
- *
- * RESPONSIVE / CROSS-PLATFORM STRATEGY
- * --------------------------------------------------------------------------
- * - Phaser.Scale.RESIZE makes the internal game canvas resolution track the
- *   real size of #game-container on every resize event, which fires both on
- *   browser window resize (desktop) AND on orientation change (mobile).
- *   Because of this, every Scene must read camera bounds dynamically
- *   (this.cameras.main.width / height) rather than hard-coding pixel
- *   coordinates, so that UI and gameplay objects always re-flow correctly.
- * - Phaser.Scale.CENTER_BOTH guarantees the canvas remains centered inside
- *   its parent container regardless of aspect ratio mismatches.
- * - Arcade Physics is configured with zero gravity since this is a top-down
- *   tower-defense layout; nothing should ever fall under gravity.
+ * Owns Phaser configuration, YouTube Playables system hooks, and a shared
+ * cloud-save bridge used by gameplay / menu / game-over scenes.
  */
 
 const getDpr = () => Math.min(window.devicePixelRatio || 1, 2);
+
+/**
+ * Shared persistence bridge — YouTube cloud save in playables, localStorage
+ * fallback for local development when ytgame is unavailable.
+ */
+const CityDefenseSave = {
+  isPlayableEnv() {
+    return typeof window.ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV;
+  },
+
+  _parsePayload(raw) {
+    if (!raw) return {};
+    if (typeof raw === 'string') {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return {};
+      }
+    }
+    return raw;
+  },
+
+  loadData() {
+    if (this.isPlayableEnv()) {
+      return ytgame.game.loadData()
+        .then((raw) => {
+          const data = this._parsePayload(raw);
+          return {
+            gold: parseInt(data.gold, 10) || 0,
+            bestWave: parseInt(data.bestWave, 10) || 0,
+            bestTime: parseInt(data.bestTime, 10) || 0,
+          };
+        })
+        .catch(() => ({ gold: 0, bestWave: 0, bestTime: 0 }));
+    }
+
+    return Promise.resolve({
+      gold: parseInt(localStorage.getItem('guard_city_gold'), 10) || 0,
+      bestWave: parseInt(localStorage.getItem('guard_city_best_wave'), 10) || 0,
+      bestTime: parseInt(localStorage.getItem('guard_city_best_time'), 10) || 0,
+    });
+  },
+
+  saveData(state) {
+    const payload = {
+      gold: state.gold || 0,
+      bestWave: state.bestWave || 0,
+      bestTime: state.bestTime || 0,
+    };
+
+    if (this.isPlayableEnv()) {
+      return ytgame.game.saveData(JSON.stringify(payload));
+    }
+
+    localStorage.setItem('guard_city_gold', payload.gold);
+    localStorage.setItem('guard_city_best_wave', payload.bestWave);
+    localStorage.setItem('guard_city_best_time', payload.bestTime);
+    return Promise.resolve();
+  },
+};
+
+window.CityDefenseSave = CityDefenseSave;
 
 const config = {
   type: Phaser.AUTO,
@@ -49,25 +95,44 @@ const config = {
   physics: {
     default: 'arcade',
     arcade: {
-      gravity: { y: 0 }, // absolute zero gravity — top-down game, nothing should fall
+      gravity: { y: 0 },
       debug: false,
     },
   },
 
-  // Scene registration order: Menu boots first by default (first entry in
-  // the array is auto-started by Phaser unless told otherwise).
   scene: [MenuScene, GameplayScene, GameOverScene],
 };
 
-// Instantiate the engine. From this point forward, all control flow lives
-// inside the registered Scene classes.
 const game = new Phaser.Game(config);
 
-/**
- * Safety net: keep the canvas properly sized any time the browser window
- * or device orientation changes, even on platforms where the 'resize'
- * scale event can be a little late to fire (some older mobile WebViews).
- */
+function initYouTubePlayablesSDK() {
+  if (typeof window.ytgame === 'undefined' || !ytgame.IN_PLAYABLES_ENV) {
+    return;
+  }
+
+  if (ytgame.system.isAudioEnabled && !ytgame.system.isAudioEnabled()) {
+    game.sound.mute = true;
+  }
+
+  ytgame.system.onAudioEnabledChange((isEnabled) => {
+    game.sound.mute = !isEnabled;
+  });
+
+  ytgame.system.onPause(() => {
+    game.loop.sleep();
+    game.sound.mute = true;
+  });
+
+  ytgame.system.onResume(() => {
+    game.loop.wake();
+    if (ytgame.system.isAudioEnabled()) {
+      game.sound.mute = false;
+    }
+  });
+}
+
+game.events.once('ready', initYouTubePlayablesSDK);
+
 function resizeGame() {
   const w = window.innerWidth;
   const h = window.innerHeight;
