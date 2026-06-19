@@ -39,8 +39,6 @@ class MenuScene extends Phaser.Scene {
 
     this.vignette = this.add.rectangle(width / 2, height / 2, width, height, 0x05080f, 0.55);
 
-    const savedGold = parseInt(localStorage.getItem('guard_city_gold'), 10) || 0;
-
     this.titleText = this.add.text(width / 2, 0, 'IDLE TOWER', {
       fontFamily: 'Georgia, "Times New Roman", serif',
       fontSize: `${Math.max(36, Math.round(width * 0.09))}px`,
@@ -51,7 +49,7 @@ class MenuScene extends Phaser.Scene {
       shadow: { offsetX: 0, offsetY: 4, color: '#000000', blur: 12, fill: true },
     }).setOrigin(0.5);
 
-    this.goldHint = this.add.text(width / 2, 0, `VAULT GOLD: ${savedGold}`, {
+    this.goldHint = this.add.text(width / 2, 0, 'VAULT GOLD: 0', {
       fontFamily: 'Consolas, monospace',
       fontSize: `${Math.max(14, Math.round(width * 0.022))}px`,
       color: '#ffd700',
@@ -65,6 +63,11 @@ class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this._layoutMenuText(width, height);
+
+    CityDefenseSave.loadData().then((data) => {
+      this._savedGold = data.gold || 0;
+      this.goldHint.setText(`VAULT GOLD: ${this._savedGold}`);
+    });
 
     this.createEnterButton(width, height);
     this.scale.on('resize', this.handleResize, this);
@@ -84,7 +87,7 @@ class MenuScene extends Phaser.Scene {
     this.titleText.setFontSize(titleSize);
     this.goldHint.setFontSize(goldSize);
     this.subtitleText.setFontSize(subtitleSize);
-    this.goldHint.setText(`VAULT GOLD: ${parseInt(localStorage.getItem('guard_city_gold'), 10) || 0}`);
+    this.goldHint.setText(`VAULT GOLD: ${this._savedGold || 0}`);
 
     let y = height * 0.22;
 

@@ -5,7 +5,7 @@
  *
  * Compound citadel + perimeter fence layout, pooled arcade physics groups,
  * cursor-targeted player fire, automated guard matrix, escalating enemy
- * waves, shop economy, and localStorage-backed gold persistence.
+ * waves, shop economy, and YouTube cloud-backed gold persistence.
  */
 class GameplayScene extends Phaser.Scene {
   constructor() {
@@ -99,7 +99,9 @@ class GameplayScene extends Phaser.Scene {
     this.spawnDelay = 3000;
     this.sessionGoldEarned = 0;
 
-    this.gold = parseInt(localStorage.getItem('guard_city_gold'), 10) || 0;
+    this.gold = 0;
+    this.bestWave = 0;
+    this.bestTime = 0;
     this.citadelHP = 100;
     this.citadelMaxHP = 100;
     this.hpUpgradeCost = 30;
@@ -114,6 +116,10 @@ class GameplayScene extends Phaser.Scene {
     this.centerY = height / 2;
 
     this._buildBackground(width, height);
+    this._notifyFirstFrameReady();
+
+    this._playerDataPromise = this._loadPlayerProgress();
+
     this._buildDefenseLayout();
     this._buildHUD(width, height);
     this._buildShop(width, height);
@@ -124,7 +130,77 @@ class GameplayScene extends Phaser.Scene {
     this.scale.on('resize', this.handleResize, this);
     this.events.once('shutdown', this._shutdown, this);
 
+    this._playerDataPromise.then(() => {
+      if (this.goldText) this.syncGoldDisplay();
+      if (this.shopButtons) this.refreshShopAffordability();
+    });
+
+    this._notifyGameReady();
+
     this.time.delayedCall(100, () => this.spawnInitialWave());
+  }
+
+  _notifyFirstFrameReady() {
+    if (typeof window.ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV) {
+      ytgame.game.firstFrameReady();
+    }
+  }
+
+  _notifyGameReady() {
+    if (typeof window.ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV) {
+      ytgame.game.gameReady();
+    }
+  }
+
+  _loadPlayerProgress() {
+    if (typeof window.ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV) {
+      return ytgame.game.loadData()
+        .then((raw) => {
+          let data = {};
+          if (typeof raw === 'string') {
+            try {
+              data = JSON.parse(raw || '{}');
+            } catch {
+              data = {};
+            }
+          } else {
+            data = raw || {};
+          }
+          this.gold = data.gold || 0;
+          this.bestWave = parseInt(data.bestWave, 10) || 0;
+          this.bestTime = parseInt(data.bestTime, 10) || 0;
+        })
+        .catch(() => {
+          this.gold = 0;
+          this.bestWave = 0;
+          this.bestTime = 0;
+        });
+    }
+
+    return CityDefenseSave.loadData().then((data) => {
+      this.gold = data.gold || 0;
+      this.bestWave = data.bestWave || 0;
+      this.bestTime = data.bestTime || 0;
+    });
+  }
+
+  _persistProgress() {
+    if (this.waveNumber > this.bestWave) {
+      this.bestWave = this.waveNumber;
+    }
+    const elapsed = Math.floor(this.elapsedTime);
+    if (elapsed > this.bestTime) {
+      this.bestTime = elapsed;
+    }
+
+    const payload = { gold: this.gold, bestWave: this.bestWave, bestTime: this.bestTime };
+
+    if (typeof window.ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV) {
+      ytgame.game.saveData(JSON.stringify(payload));
+      return;
+    }
+
+    CityDefenseSave.saveData(payload);
   }
 
   spawnInitialWave() {
@@ -228,6 +304,7 @@ class GameplayScene extends Phaser.Scene {
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(100);
 
     this._layoutHUD(width, height);
+    this._createRewardedAdButton(width, height);
   }
 
   _layoutHUD(width, height) {
@@ -261,6 +338,84 @@ class GameplayScene extends Phaser.Scene {
       this.hpText.setOrigin(0.5, 0).setPosition(width / 2, safeTop);
       this.guardText.setOrigin(1, 0).setPosition(width - pad, safeTop);
     }
+  }
+
+  async _requestInterstitialAd() {
+    try {
+      if (typeof ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV) {
+        await ytgame.ads.requestInterstitialAd();
+      }
+    } catch (error) {
+      console.warn('Interstitial ad failed or was skipped:', error);
+    }
+  }
+
+  async _requestRewardedAd(rewardId) {
+    try {
+      if (typeof ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV) {
+        return await ytgame.ads.requestRewardedAd(rewardId);
+      }
+    } catch (error) {
+      console.warn('Rewarded ad failed or was skipped:', error);
+    }
+    return false;
+  }
+
+  _createRewardedAdButton(width, height) {
+    if (!this.rewardedAdBg) {
+      this.rewardedAdBg = this.add.rectangle(0, 0, 100, 30, 0x2a1f3d, 0.9)
+        .setStrokeStyle(2, 0xc084fc)
+        .setScrollFactor(0)
+        .setDepth(100)
+        .setInteractive({ useHandCursor: true });
+
+      this.rewardedAdText = this.add.text(0, 0, 'AD +10G', {
+        fontFamily: 'Consolas, monospace',
+        color: '#e9d5ff',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(101);
+
+      this.rewardedAdBg.on('pointerup', () => {
+        this._watchRewardedAdForGold();
+      });
+
+      this._rewardedAdPending = false;
+    }
+
+    this._layoutRewardedAdButton(width, height);
+  }
+
+  _layoutRewardedAdButton(width, height) {
+    if (!this.rewardedAdBg) return;
+
+    const mobile = this._isMobileView(width, height);
+    const btnW = mobile ? 108 : 132;
+    const btnH = mobile ? 26 : 30;
+    const pad = mobile ? 10 : 14;
+    const uiSize = mobile
+      ? Math.max(11, Math.round(width * 0.029))
+      : Math.max(13, Math.round(Math.min(width, height) * 0.022));
+    const lineGap = uiSize + 7;
+    const safeTop = mobile ? 10 : 12;
+    const x = width - pad - btnW / 2;
+    const y = mobile ? safeTop + lineGap * 4 + 18 : safeTop + lineGap * 3 + 8;
+
+    this.rewardedAdBg.setPosition(x, y).setSize(btnW, btnH);
+    this.rewardedAdText.setPosition(x, y).setFontSize(mobile ? 10 : 11);
+  }
+
+  async _watchRewardedAdForGold() {
+    if (this._rewardedAdPending || this.gameOver) return;
+
+    this._rewardedAdPending = true;
+    const rewardEarned = await this._requestRewardedAd('merchant-guard-bonus-gold-10');
+
+    if (rewardEarned) {
+      this.gold += 10;
+      this.syncGoldDisplay();
+      this.refreshShopAffordability();
+    }
+
+    this._rewardedAdPending = false;
   }
 
   _hpLabel() {
@@ -761,7 +916,7 @@ class GameplayScene extends Phaser.Scene {
 
   syncGoldDisplay() {
     this.goldText.setText(`GOLD: ${this.gold}`);
-    localStorage.setItem('guard_city_gold', this.gold);
+    this._persistProgress();
   }
 
   updateHealthDisplay() {
@@ -780,17 +935,14 @@ class GameplayScene extends Phaser.Scene {
     if (this.escalationTimer) this.escalationTimer.remove(false);
     if (this.guardTimer) this.guardTimer.remove(false);
 
-    localStorage.setItem('guard_city_gold', this.gold);
-
-    const bestWave = parseInt(localStorage.getItem('guard_city_best_wave'), 10) || 0;
-    const bestTime = parseInt(localStorage.getItem('guard_city_best_time'), 10) || 0;
-
-    if (this.waveNumber > bestWave) {
-      localStorage.setItem('guard_city_best_wave', this.waveNumber);
+    if (this.waveNumber > this.bestWave) {
+      this.bestWave = this.waveNumber;
     }
-    if (Math.floor(this.elapsedTime) > bestTime) {
-      localStorage.setItem('guard_city_best_time', Math.floor(this.elapsedTime));
+    const elapsed = Math.floor(this.elapsedTime);
+    if (elapsed > this.bestTime) {
+      this.bestTime = elapsed;
     }
+    this._persistProgress();
 
     this.enemies.getChildren().forEach((enemy) => {
       if (enemy.active) this.recycleEnemy(enemy);
@@ -805,6 +957,8 @@ class GameplayScene extends Phaser.Scene {
       finalWave: this.waveNumber,
       elapsedTime: Math.floor(this.elapsedTime),
       guardsDeployed: this.guardCount,
+      bestWave: this.bestWave,
+      bestTime: this.bestTime,
     });
   }
 
@@ -853,6 +1007,7 @@ class GameplayScene extends Phaser.Scene {
     this._drawFenceRing();
 
     this._layoutHUD(width, height);
+    this._layoutRewardedAdButton(width, height);
 
     const shopY = height - Math.max(64, height * 0.09);
     const btnH = Math.max(48, height * 0.07);

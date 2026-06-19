@@ -4,7 +4,7 @@
  * Terminal screen for "Idle Tower: Merchant Guard".
  *
  * Displays run metrics in a structured panel, preserves the cumulative
- * localStorage wallet, and offers a REDEPLOY DEFENSES restart.
+ * wallet via YouTube cloud save, and offers a REDEPLOY DEFENSES restart.
  */
 class GameOverScene extends Phaser.Scene {
   constructor() {
@@ -17,6 +17,8 @@ class GameOverScene extends Phaser.Scene {
     this.finalWave = (data && typeof data.finalWave === 'number') ? data.finalWave : 1;
     this.elapsedTime = (data && typeof data.elapsedTime === 'number') ? data.elapsedTime : 0;
     this.guardsDeployed = (data && typeof data.guardsDeployed === 'number') ? data.guardsDeployed : 0;
+    this.bestWave = (data && typeof data.bestWave === 'number') ? data.bestWave : 0;
+    this.bestTime = (data && typeof data.bestTime === 'number') ? data.bestTime : 0;
   }
 
   create() {
@@ -93,6 +95,8 @@ class GameOverScene extends Phaser.Scene {
       this.handleRedeploy();
     });
 
+    this._redeployPending = false;
+
     this.menuBg = this.add.rectangle(0, 0, 100, 42, 0x1f2937, 0.9)
       .setStrokeStyle(2, 0x64748b)
       .setInteractive({ useHandCursor: true });
@@ -107,11 +111,18 @@ class GameOverScene extends Phaser.Scene {
     });
 
     this._applyLayout(width, height);
+    this._sendEngagementScore(this.finalWave * 1000 + this.finalGold);
 
     this.scale.on('resize', this.handleResize, this);
     this.events.once('shutdown', () => {
       this.scale.off('resize', this.handleResize, this);
     });
+  }
+
+  _sendEngagementScore(finalScore) {
+    if (typeof window.ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV) {
+      ytgame.engagement.sendScore({ value: finalScore });
+    }
   }
 
   _createStatRow(label, value, valueColor) {
@@ -209,8 +220,8 @@ class GameOverScene extends Phaser.Scene {
     this.dividerMid.setPosition(panelX, y).setSize(panelW - padX * 2, 1);
     y += 14;
 
-    const bestWave = parseInt(localStorage.getItem('guard_city_best_wave'), 10) || 0;
-    const bestTime = parseInt(localStorage.getItem('guard_city_best_time'), 10) || 0;
+    const bestWave = this.bestWave;
+    const bestTime = this.bestTime;
 
     this.recordLine.setFontSize(recordSize).setPosition(panelX, y);
     y += recordSize + 10;
@@ -231,9 +242,21 @@ class GameOverScene extends Phaser.Scene {
     this.menuText.setFontSize(Math.max(11, Math.round(btnWidth * 0.048))).setPosition(panelX, menuY);
   }
 
-  handleRedeploy() {
+  async handleRedeploy() {
+    if (this._redeployPending) return;
+    this._redeployPending = true;
+
+    try {
+      if (typeof ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV) {
+        await ytgame.ads.requestInterstitialAd();
+      }
+    } catch (error) {
+      console.warn('Interstitial ad failed or was skipped:', error);
+    }
+
     this.scene.stop('GameplayScene');
     this.scene.start('GameplayScene');
+    this._redeployPending = false;
   }
 
   handleResize(gameSize) {
